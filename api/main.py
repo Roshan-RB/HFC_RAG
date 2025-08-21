@@ -6,8 +6,43 @@ from chroma_utils import index_document_to_chroma, delete_doc_from_chroma
 import os
 import uuid
 import logging
+from folder_sync import sync_once, FolderWatcher
 logging.basicConfig(filename='app.log', level=logging.INFO)
 app = FastAPI()
+
+# NEW: default to your local docs folder
+WATCH_DIR = os.getenv("WATCH_DIR", "./docs")
+ENABLE_WATCH = os.getenv("ENABLE_WATCH", "true").lower() == "true"
+_watcher = None
+
+@app.on_event("startup")
+def on_startup():
+    # First reconcile everything on disk with DB + Chroma
+    stats = sync_once(WATCH_DIR)
+    logging.info(f"[startup sync] {stats}")
+
+    # Then start live watcher (created/deleted)
+    if ENABLE_WATCH:
+        try:
+            global _watcher
+            _watcher = FolderWatcher(WATCH_DIR)
+            _watcher.start()
+            logging.info("Folder watcher started")
+        except Exception as e:
+            logging.exception(f"Failed to start folder watcher: {e}")
+
+@app.on_event("shutdown")
+def on_shutdown():
+    global _watcher
+    if _watcher:
+        _watcher.stop()
+        _watcher = None
+
+# Optional: manual sync endpoint (handy for a Streamlit button)
+@app.post("/sync-now")
+def sync_now():
+    stats = sync_once(WATCH_DIR)
+    return {"watch_dir": WATCH_DIR, "stats": stats}
 
 @app.post("/chat", response_model=QueryResponse)
 def chat(query_input: QueryInput):

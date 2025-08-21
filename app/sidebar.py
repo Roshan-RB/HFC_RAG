@@ -1,4 +1,5 @@
 import streamlit as st
+import requests
 from api_utils import upload_document, list_documents, delete_document
 
 def display_sidebar():
@@ -22,6 +23,19 @@ def display_sidebar():
     if st.sidebar.button("Refresh Document List"):
         with st.spinner("Refreshing..."):
             st.session_state.documents = list_documents()
+    
+    if st.sidebar.button("🔄 Sync Now"):
+        try:
+            res = requests.post("http://localhost:8000/sync-now", timeout=30)
+            res.raise_for_status()
+            data = res.json()
+
+            st.sidebar.success(f"Synced folder: {data['watch_dir']}")
+            stats = data.get("stats", {})
+            st.sidebar.write("**Stats:**")
+            st.sidebar.json(stats)  # pretty-print dict
+        except Exception as e:
+            st.sidebar.error(f"Sync failed: {e}")
 
     # Initialize document list if not present
     if "documents" not in st.session_state:
