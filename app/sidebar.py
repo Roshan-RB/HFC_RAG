@@ -20,20 +20,17 @@ def display_sidebar():
 
     # Sidebar: List Documents
     st.sidebar.header("Uploaded Documents")
-    if st.sidebar.button("Refresh Document List"):
-        with st.spinner("Refreshing..."):
-            st.session_state.documents = list_documents()
     
-    if st.sidebar.button("🔄 Sync Now"):
+    if st.sidebar.button("🔄 Sync Now (if uploaded to folder)"):
         try:
             res = requests.post("http://localhost:8000/sync-now", timeout=30)
             res.raise_for_status()
             data = res.json()
 
             st.sidebar.success(f"Synced folder: {data['watch_dir']}")
-            stats = data.get("stats", {})
-            st.sidebar.write("**Stats:**")
-            st.sidebar.json(stats)  # pretty-print dict
+            #stats = data.get("stats", {})
+            #st.sidebar.write("**Stats:**")
+            #st.sidebar.json(stats)  # pretty-print dict
         except Exception as e:
             st.sidebar.error(f"Sync failed: {e}")
 
@@ -42,17 +39,26 @@ def display_sidebar():
         st.session_state.documents = list_documents()
 
     documents = st.session_state.documents
-    if documents:
-        for doc in documents:
-            st.sidebar.text(f"{doc['filename']} (ID: {doc['id']}, Uploaded: {doc['upload_timestamp']})")
+    with st.sidebar.expander("List Documents", expanded=False):
+        if documents:
+            for doc in documents:
+                st.text(
+                    f"{doc['filename']} (ID: {doc['id']}, Uploaded: {doc['upload_timestamp']})"
+                )
+            if st.button("Refresh Document List"):
+                with st.spinner("Refreshing..."):
+                    st.session_state.documents = list_documents()
+        else:
+            st.info("No documents available.")
         
         # Delete Document
-        selected_file_id = st.sidebar.selectbox("Select a document to delete", options=[doc['id'] for doc in documents], format_func=lambda x: next(doc['filename'] for doc in documents if doc['id'] == x))
-        if st.sidebar.button("Delete Selected Document"):
-            with st.spinner("Deleting..."):
-                delete_response = delete_document(selected_file_id)
-                if delete_response:
-                    st.sidebar.success(f"Document with ID {selected_file_id} deleted successfully.")
-                    st.session_state.documents = list_documents()  # Refresh the list after deletion
-                else:
-                    st.sidebar.error(f"Failed to delete document with ID {selected_file_id}.")
+        with st.sidebar.expander("Delete Document", expanded=False):
+            selected_file_id = st.selectbox("Select a document to delete", options=[doc['id'] for doc in documents], format_func=lambda x: next(doc['filename'] for doc in documents if doc['id'] == x))
+            if st.button("Delete Selected Document"):
+                with st.spinner("Deleting..."):
+                    delete_response = delete_document(selected_file_id)
+                    if delete_response:
+                        st.sidebar.success(f"Document with ID {selected_file_id} deleted successfully.")
+                        st.session_state.documents = list_documents()  # Refresh the list after deletion
+                    else:
+                        st.sidebar.error(f"Failed to delete document with ID {selected_file_id}.")
