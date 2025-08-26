@@ -113,3 +113,29 @@ def delete_document(request: DeleteFileRequest):
             return {"error": f"Deleted from Chroma but failed to delete document with file_id {request.file_id} from the database."}
     else:
         return {"error": f"Failed to delete document with file_id {request.file_id} from Chroma."}
+    
+# --- DEBUG ROUTES (inspect Chroma contents) ---
+from typing import Optional
+from fastapi import HTTPException, Query
+from fastapi.responses import FileResponse
+from chroma_utils import vectorstore
+
+
+@app.get("/debug/chroma/summary")
+def debug_chroma_summary(file_id: Optional[int] = None):
+    """
+    Count chunks per block_type (text/table/figure/heading/summary) for a file (or all files).
+    """
+    where_base = {}
+    if file_id is not None:
+        where_base["file_id"] = file_id
+
+    coll = vectorstore._collection  # underlying Chroma collection
+    out = {}
+    for t in ["text", "heading", "table", "figure", "summary"]:
+        where = dict(where_base)
+        where["block_type"] = t
+        res = coll.get(where=where, include=[])
+        out[t] = len(res.get("ids", []))
+    return out
+

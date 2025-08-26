@@ -6,6 +6,15 @@ from typing import List
 from langchain_core.documents import Document
 import os
 from dotenv import load_dotenv
+# NEW imports
+import asyncio
+from docling_pipeline import (
+    convert_with_docling,
+    docling_to_blocks,
+    smart_chunk,
+    enrich_blocks_with_llm,
+    export_for_embedding,
+)
 
 # --- one-time setup ---
 load_dotenv()
@@ -19,32 +28,33 @@ embedding_function = OpenAIEmbeddings(api_key=OPENAI_API_KEY,
             model="text-embedding-3-small")
 vectorstore = Chroma(persist_directory="./chroma_db", embedding_function=embedding_function)
 
-def load_and_split_document(file_path: str) -> List[Document]:
-    if file_path.endswith('.pdf'):
-        loader = PyPDFLoader(file_path)
-    elif file_path.endswith('.docx'):
-        loader = Docx2txtLoader(file_path)
-    elif file_path.endswith('.html'):
-        loader = UnstructuredHTMLLoader(file_path)
-    else:
-        raise ValueError(f"Unsupported file type: {file_path}")
-    
-    documents = loader.load()
-    return text_splitter.split_documents(documents)
+def _docling_prepare(file_path: str):
+    """
+    Docling -> blocks -> smart chunks -> LLM enrichment (captions/summaries) -> docs/metas
+    (All synchronous to avoid event-loop conflicts.)
+    """
+    doc = convert_with_docling(file_path)
+    blocks = docling_to_blocks(doc, file_path)
+    chunks = smart_chunk(blocks, max_chars=1500)
+    enriched = enrich_blocks_with_llm(chunks, model="gpt-4o-mini")
+    return export_for_embedding(enriched)  # -> (docs, metas)
 
 def index_document_to_chroma(file_path: str, file_id: int) -> bool:
+    """
+    Use Docling for ALL supported docs (pdf, docx, html, pptx).
+    Store rich metadata so your retriever can render tables/figures later.
+    """
     try:
-        splits = load_and_split_document(file_path)
-        
-        # Add metadata to each split
-        for split in splits:
-            split.metadata['file_id'] = file_id
-        
-        vectorstore.add_documents(splits)
-        # vectorstore.persist()
+        documents, metadatas = _docling_prepare(file_path)
+
+        # Attach file_id to each metadata
+        for m in metadatas:
+            m["file_id"] = file_id
+
+        vectorstore.add_texts(texts=documents, metadatas=metadatas)
         return True
     except Exception as e:
-        print(f"Error indexing document: {e}")
+        print(f"Error indexing document with Docling: {e}")
         return False
 
 def delete_doc_from_chroma(file_id: int):

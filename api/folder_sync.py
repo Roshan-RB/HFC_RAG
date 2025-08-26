@@ -10,7 +10,7 @@ from db_utils import (
 )
 from chroma_utils import index_document_to_chroma, delete_doc_from_chroma
 
-SUPPORTED_EXTS = {".pdf", ".docx", ".html"}
+SUPPORTED_EXTS = {".pdf", ".docx", ".html", ".pptx"}
 
 def _iter_supported_files(root: str) -> List[str]:
     root = os.path.abspath(root)
