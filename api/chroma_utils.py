@@ -7,16 +7,15 @@ from langchain_core.documents import Document
 import os
 from dotenv import load_dotenv
 
+
 # --- one-time setup ---
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise RuntimeError("OPENAI_API_KEY not set")
 
-
 text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200, length_function=len)
-embedding_function = OpenAIEmbeddings(api_key=OPENAI_API_KEY,
-            model="text-embedding-3-small")
+embedding_function = OpenAIEmbeddings()
 vectorstore = Chroma(persist_directory="./chroma_db", embedding_function=embedding_function)
 
 def load_and_split_document(file_path: str) -> List[Document]:
@@ -58,4 +57,39 @@ def delete_doc_from_chroma(file_id: int):
         return True
     except Exception as e:
         print(f"Error deleting document with file_id {file_id} from Chroma: {str(e)}")
+        return False
+    
+def index_markdown_content(file_id: int, filename: str, markdown_text: str) -> bool:
+    """
+    Split Markdown and push chunks into Chroma with consistent metadata.
+    """
+    try:
+        chunks = text_splitter.split_text(markdown_text or "")
+        docs: List[Document] = []
+        for i, chunk in enumerate(chunks, start=1):
+            docs.append(
+                Document(
+                    page_content=chunk,
+                    metadata={
+                        "file_id": file_id,
+                        "filename": filename,
+                        "source": "docling",
+                        "chunk_index": i,
+                    },
+                )
+            )
+        if not docs:
+            print(f"No content produced from Markdown for file_id={file_id}")
+            return False
+
+        vectorstore.add_documents(docs)
+        try:
+            vectorstore.persist()  # safe no-op on some versions
+        except Exception:
+            pass
+
+        print(f"Indexed {len(docs)} Markdown chunks for file_id={file_id}")
+        return True
+    except Exception as e:
+        print(f"Error indexing Markdown for file_id {file_id}: {e}")
         return False
