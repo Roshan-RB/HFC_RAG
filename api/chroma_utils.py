@@ -46,6 +46,7 @@ def index_document_to_chroma(file_path: str, file_id: int) -> bool:
     """
     try:
         documents, metadatas = _docling_prepare(file_path)
+        print(metadatas)
 
         # Attach file_id to each metadata
         for m in metadatas:
