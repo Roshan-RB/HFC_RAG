@@ -1,11 +1,12 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
-from pydantic_models import QueryInput, QueryResponse, DocumentInfo, DeleteFileRequest
+from pydantic_models import QueryInput, QueryResponse, DocumentInfo, DeleteFileRequest, SourceItem
 from langchain_utils import get_rag_chain
 from db_utils import insert_application_logs, get_chat_history, get_all_documents, insert_document_record, delete_document_record
 from chroma_utils import index_document_to_chroma, delete_doc_from_chroma
 import os
 import uuid
 import logging
+import re
 from folder_sync import sync_once, FolderWatcher
 logging.basicConfig(filename='app.log', level=logging.INFO)
 app = FastAPI()
@@ -46,23 +47,45 @@ def sync_now():
 
 @app.post("/chat", response_model=QueryResponse)
 def chat(query_input: QueryInput):
-    session_id = query_input.session_id
+    session_id = query_input.session_id or str(uuid.uuid4())
     logging.info(f"Session ID: {session_id}, User Query: {query_input.question}, Model: {query_input.model.value}")
-    if not session_id:
-        session_id = str(uuid.uuid4())
-
-    
 
     chat_history = get_chat_history(session_id)
     rag_chain = get_rag_chain(query_input.model.value)
-    answer = rag_chain.invoke({
+
+    result = rag_chain.invoke({
         "input": query_input.question,
         "chat_history": chat_history
-    })['answer']
-    
+    })
+    answer = result["answer"]
+    docs = result.get("context", [])  # list[Document]
+
+    # Parse [S1], [S2], ...
+    cited_idxs = {int(m.group(1)) for m in re.finditer(r"\[S(\d+)\]", answer)}
+
+    sources = []
+    for i, d in enumerate(docs, start=1):
+        if i not in cited_idxs:
+            continue  # ONLY keep cited
+        m = d.metadata or {}
+        sources.append(SourceItem(
+            file_id=m.get("file_id"),
+            file_name=m.get("file_name") or os.path.basename(m.get("source_path", "") or ""),
+            block_id=m.get("block_id"),
+            block_type=m.get("block_type"),
+            page=m.get("page"),
+            asset_base=m.get("asset_base"),
+            image_path=m.get("image_path"),
+            table_path=m.get("table_path"),
+            table_csv_path=m.get("table_csv_path"),
+            original_text_preview=m.get("original_text_preview"),
+            rank=i,
+            cited=True,
+            text=d.page_content,  # full original chunk
+        ))
+
     insert_application_logs(session_id, query_input.question, answer, query_input.model.value)
-    logging.info(f"Session ID: {session_id}, AI Response: {answer}")
-    return QueryResponse(answer=answer, session_id=session_id, model=query_input.model)
+    return QueryResponse(answer=answer, session_id=session_id, model=query_input.model, sources=sources)
 
 from fastapi import UploadFile, File, HTTPException
 import os
